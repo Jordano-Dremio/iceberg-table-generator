@@ -46,6 +46,8 @@ import org.apache.iceberg.deletes.EqualityDeleteWriter;
 import org.apache.iceberg.deletes.PositionDelete;
 import org.apache.iceberg.deletes.PositionDeleteIndex;
 import org.apache.iceberg.deletes.PositionDeleteWriter;
+import org.apache.iceberg.encryption.EncryptedFiles;
+import org.apache.iceberg.encryption.EncryptedOutputFile;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.expressions.Term;
@@ -55,8 +57,6 @@ import org.apache.iceberg.io.DeleteWriteResult;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.io.OutputFileFactory;
-import org.apache.iceberg.encryption.EncryptedOutputFile;
-import org.apache.iceberg.encryption.EncryptedFiles;
 import org.apache.iceberg.parquet.Parquet;
 
 public class IcebergTableGenerator {
@@ -70,7 +70,7 @@ public class IcebergTableGenerator {
 
     // Table-specific counters for deletion vector files per partition
     private final java.util.Map<String, java.util.concurrent.atomic.AtomicInteger>
-        partitionDVCounters = new java.util.concurrent.ConcurrentHashMap<>();
+            partitionDVCounters = new java.util.concurrent.ConcurrentHashMap<>();
 
     public IcebergTableGenerator(String warehousePath, Configuration conf, TableIdentifier id) {
         this.catalog = new HadoopCatalog();
@@ -355,7 +355,8 @@ public class IcebergTableGenerator {
             rowDelta.commit();
             System.out.println("RowDelta committed successfully!");
         } else {
-            System.out.println("RowDelta not committed (will be committed later with transaction).");
+            System.out.println(
+                    "RowDelta not committed (will be committed later with transaction).");
         }
         return this;
     }
@@ -794,7 +795,8 @@ public class IcebergTableGenerator {
             OutputFile outputFile = table.io().newOutputFile(customPath);
 
             // Use EncryptedFiles to create a proper EncryptedOutputFile
-            EncryptedOutputFile encryptedOutputFile = EncryptedFiles.encryptedOutput(outputFile, (byte[]) null);
+            EncryptedOutputFile encryptedOutputFile =
+                    EncryptedFiles.encryptedOutput(outputFile, (byte[]) null);
 
             System.out.println(
                     "Calling BaseDVFileWriter.close(EncryptedOutputFile) with custom path: "

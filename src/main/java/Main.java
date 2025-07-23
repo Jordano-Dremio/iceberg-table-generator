@@ -149,10 +149,11 @@ public class Main {
         // createDvs();
         // createProductsWithEqDeletesAndPosDeletesSameSequenceNumber();
         // createProductsWithEqDeletesAndOverlappingPosDeletes();
-        createProductsWithDeletionVectorsOnly();
+/*        createProductsWithDeletionVectorsOnly();
         createProductsWithDeletionVectorsAndEqualityDeletes();
         createProductsWithDeletionVectorsAndV2PositionDeletes();
-        createProductsWithDeletionVectorsEqualityDeletesAndV2PositionDeletes();
+        createProductsWithDeletionVectorsEqualityDeletesAndV2PositionDeletes();*/
+        createMultiRowgroupOrdersWithDeletionVectors();
 
         // Test the new partition-aware deletion vectors method
         // testPartitionAwareDeletionVectors();
@@ -343,6 +344,63 @@ public class Main {
                         r ->
                                 r.get(0, Integer.class) % 3000 >= 700
                                         && r.get(0, Integer.class) % 3000 < 1200)
+                .commit();
+    }
+
+    /***
+     * <p>Creation steps:
+     *
+     * <p>
+     *
+     * <pre>
+     * 1. Insert 3000 rows each to partitions 2019, 2020, 2021 (3 files per partition, 1000 rows each). Total rows: 9000
+     * 2. Delete rows in all partitions with COMBINED predicates:                                       Total rows: 6900 (2100 rows removed by DV)
+     *    - Combined predicate:
+     *      (order_id % 10 < 3)
+     *      OR
+     *      (order_id % 3000 >= 700 && order_id % 3000 < 1200)
+     *
+     * Total rows inserted: 9000
+     * Total rows deleted : 2100 (via deletion vectors)
+     * Final row count    : 6900
+     * </pre>
+     */
+    private void createMultiRowgroupOrdersWithDeletionVectors() throws IOException {
+        // Create a properties map with format version 2 initially, then upgrade to v3 for deletion
+        // vectors
+        Map<String, String> tableProperties = new HashMap<>();
+        tableProperties.put(TableProperties.FORMAT_VERSION, "2");
+        tableProperties.put(
+                TableProperties.PARQUET_ROW_GROUP_SIZE_BYTES, Integer.toString(16 * 1024));
+        tableProperties.put(TableProperties.PARQUET_PAGE_SIZE_BYTES, Integer.toString(4 * 1024));
+        tableProperties.put(TableProperties.PARQUET_DICT_SIZE_BYTES, Integer.toString(4 * 1024));
+
+        IcebergTableGenerator tableGenerator =
+                new IcebergTableGenerator(
+                        warehousePath,
+                        conf,
+                        TableIdentifier.of("multi_rowgroup_orders_with_deletion_vectors"));
+        tableGenerator
+                .create(
+                        ORDERS_SCHEMA,
+                        PartitionSpec.builderFor(ORDERS_SCHEMA).identity("order_year").build(),
+                        tableProperties)
+                .append(ImmutableList.of(2019, 2020, 2021), this::generateOrdersRecord, 3, 1000)
+                .commit();
+
+        // Update to format version 3 to enable deletion vectors
+        tableGenerator.updateTablePropertiesToV3();
+
+        tableGenerator
+                .deletionVectors(
+                        ImmutableList.of(2019, 2020, 2021),
+                        r -> {
+                            int orderId = r.get(0, Integer.class);
+                            // Combined predicate: original condition OR new condition
+                            boolean originalCondition = orderId % 10 < 3;
+                            boolean newCondition = orderId % 3000 >= 700 && orderId % 3000 < 1200;
+                            return originalCondition || newCondition;
+                        })
                 .commit();
     }
 
@@ -845,7 +903,7 @@ public class Main {
                 .commit()
                 .deletionVectors(
                         ImmutableList.of("widget", "gadget", "gizmo"),
-                    r -> r.get(0, Integer.class) % 200 >= 100 && r.get(0, Integer.class) > 400)
+                        r -> r.get(0, Integer.class) % 200 >= 100 && r.get(0, Integer.class) > 400)
                 .commit();
     }
 
@@ -904,7 +962,10 @@ public class Main {
                 .commit()
                 // delete all products with color 'green' via equality delete - 40 rows removed
                 .deletionVectors(
-                        ImmutableList.of("gizmo"), r -> r.get(3, String.class).equals("green") && r.get(0, Integer.class) >= 40)
+                        ImmutableList.of("gizmo"),
+                        r ->
+                                r.get(3, String.class).equals("green")
+                                        && r.get(0, Integer.class) >= 40)
                 .commit()
                 // add 200 rows each to widget, gadget, and gizmo partitions
                 .append(
